@@ -1,13 +1,11 @@
-from dash import Dash, dcc, html, Input, Output, State
-import dash
+from dash import Dash, dcc, html, Input, Output, State, ctx
+import dash_bootstrap_components as dbc
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-import dash_bootstrap_components as dbc
-
-from datetime import datetime, timedelta
 from urllib.request import urlretrieve
-import pandas as pd
+from datetime import datetime, timedelta
 import os
+import pandas as pd
 
 def list_datasets():
 	datasets = os.listdir('datasets/')
@@ -16,31 +14,22 @@ def list_datasets():
 		assets.append(dataset.replace('.csv',''))
 	return sorted(assets)
 
-assets = list_datasets()
-print(assets)
+avalaible_datasets = list_datasets()													# Initial creating list of datasets
 
 app = Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP], suppress_callback_exceptions = True)
 
-if len(assets) != 0:
-	assets_dropdown = dbc.DropdownMenu(label='Assets', children=[
-		dcc.RadioItems(assets, assets[0], id='asset', labelStyle={'display': 'block'}),
-	])
-else:
-	assets_dropdown = dbc.DropdownMenu(label='Assets', disabled=True, children=[
-		dcc.RadioItems(assets, id='asset', labelStyle={'display': 'block'}),
-	])	
-
 app.layout = html.Div(
 	dbc.Container([
+		# NAVIGATION
 		dbc.Row([
 			dbc.Col([
 				dbc.Nav([
-					dbc.NavItem(
-						dbc.Button("Options", id="open-offcanvas", n_clicks=0)
-					),
-					dbc.NavItem(
-						assets_dropdown,
-					),
+					dbc.NavItem([
+						dbc.Button('Data', id='open_modal_button', n_clicks=0),
+					]),
+					dbc.NavItem([
+						dcc.Dropdown(avalaible_datasets, id='asset'),
+					]),
 					dbc.NavItem(
 						dbc.DropdownMenu(label='Range', children=[
 							dcc.RadioItems(['3M', '6M', '1Y', '3Y', 'Max'], 'Max', id='date_range', labelStyle={'display': 'block'}),
@@ -79,34 +68,23 @@ app.layout = html.Div(
 								'Three Inside Up', 'Three Inside Down', 'Three Outside Up', 'Three Outside Down',
 								'Upside Tasuki Gap', 'Downside Tasuki Gap'], id='candlestick_patterns', labelStyle={'display': 'block'}),
 						]),
-					),
+					)			
 				])
 			])
 		]),
-		dbc.Offcanvas(
-			html.Div([
-				dbc.Row([
-					html.H5('Import new dataset'),
-					dbc.Input(placeholder='asset symbol', id='import_symbol'),
-					dbc.Button('Import', id='import_button', n_clicks=0),
-					html.Div([], id='import_message')
-				]),
-				dbc.Row([
-					html.H5('Technical Indicators'),
-					dbc.DropdownMenu(label='Select assets', children=[
-						dcc.Checklist(assets, id='set_of_assets', labelStyle={'display': 'block'}),
-					]),
-					dbc.DropdownMenu(label='Select modules', children=[
-						dcc.Checklist(['Technical Indicators', 'Signals', 'Candlestick Patterns'], id='set_of_modules', labelStyle={'display': 'block'}),
-					]),
-					dbc.Button('Generate', id='generate_button', n_clicks=0),
-					html.Div([], id='generate_message')
-				]),
+		# IMPORT MODAL
+		dbc.Modal([
+			dbc.ModalHeader('Import new dataset'),
+			dbc.ModalBody([
+				dbc.Input(placeholder='Type asset symbol', id='import_symbol'),
+				html.Div([], id='import_message')
 			]),
-			id='offcanvas',
-			title='Options',
-			is_open=False,
-		),
+			dbc.ModalFooter([
+				dbc.Button('Import', id='import_button', n_clicks=0),
+				dbc.Button('Close', id='close_modal_button', n_clicks=0)
+			]),
+		], id='modal', is_open=False),
+		# GRAPH
 		dbc.Row([
 			dbc.Col([
 				dcc.Graph('graph')
@@ -116,20 +94,23 @@ app.layout = html.Div(
 )
 
 @app.callback(
-	Output("offcanvas", "is_open"),
-	Input("open-offcanvas", "n_clicks"),
-	State("offcanvas", "is_open"),
+	Output('modal', 'is_open'),
+	[Input('open_modal_button', 'n_clicks'),
+	Input('close_modal_button', 'n_clicks')],
+	[State('modal', 'is_open')],
+	prevent_initial_call=True
 )
 
-def toggle_offcanvas(n1, is_open):
-	if n1:
+def toggle_modal(n1, n2, is_open):
+	if n1 or n2:
 		return not is_open
 	return is_open
 
 @app.callback(
 	Output('import_message', 'children'),
-	Input('import_button', 'n_clicks'),
-	State('import_symbol', 'value'),
+	[Input('import_button', 'n_clicks')],
+	[State('import_symbol', 'value')],
+	prevent_initial_call=True
 )
 
 def import_dataset(import_button, import_symbol):
@@ -137,336 +118,8 @@ def import_dataset(import_button, import_symbol):
 		url = 'https://stooq.com/q/d/l/?s=' + import_symbol + '&i=d'
 		csv_file = ('datasets/' + import_symbol + '.csv')
 		urlretrieve(url, csv_file)
+		avalaible_datasets.append(import_symbol)													# Updating list of datasets
 		alert = dbc.Alert('{} imported'.format(str(import_symbol)), color='success', dismissable=True)
-		return alert
-
-@app.callback(
-	Output('generate_message', 'children'),
-	Input('generate_button', 'n_clicks'),
-	State('set_of_assets', 'value'),
-	State('set_of_modules', 'value'),
-)
-
-def generate(generate_button, set_of_assets, set_of_modules):
-	if (type(set_of_modules) == list) and (type(set_of_assets) == list):
-
-		print('Selected modules: {}'.format(set_of_modules))
-		print('Selected assets: {}'.format(set_of_assets))
-
-		for asset in set_of_assets:
-
-			print(asset)
-
-			df = pd.read_csv('datasets/' + asset + '.csv')
-
-			df['Typical price'] = ( df['High'] + df['Low'] + df['Close'] ) / 3
-
-			if 'Technical Indicators' in set_of_modules:
-
-				# SMA
-				periods = [10, 20, 50, 100, 200]
-				for period in periods:
-					df['SMA ' + str(period)] = df['Close'].rolling(period).mean()
-
-				df['SMA 10/50 ratio'] = df['SMA 10'] / df['SMA 50']
-				df['SMA 20/100 ratio'] = df['SMA 20'] / df['SMA 100']		
-				df['SMA 50/200 ratio'] = df['SMA 50'] / df['SMA 200']
-
-				# EMA
-				periods = [10, 20, 50, 100, 200]
-				for period in periods:
-					df['EMA ' + str(period)] = df['Close'].ewm(span=period, min_periods=period, adjust=False).mean()
-
-				df['EMA 10/50 ratio'] = df['EMA 10'] / df['EMA 50']
-				df['EMA 20/100 ratio'] = df['EMA 20'] / df['EMA 100']
-				df['EMA 50/200 ratio'] = df['EMA 50'] / df['EMA 200']
-
-				# Bollinger
-				standard_deviation = df['Typical price'].rolling(20).std()
-				df['Upper band'] = df['SMA 20'] + 2*standard_deviation
-				df['Lower band'] = df['SMA 20'] - 2*standard_deviation
-				df['Percent_b'] = (df['Close'] - df['Lower band']) / (df['Upper band'] - df['Lower band'])
-				df['Bandwidth'] = (df['Upper band'] - df['Lower band']) / df['SMA 20']
-
-				# RSI
-				df.loc[df['Close'] > df['Close'].shift(1), 'Upward change'] = df['Close'] - df['Close'].shift(1)
-				df.loc[df['Close'] <= df['Close'].shift(1), 'Upward change'] = 0
-				df.loc[df['Close'] < df['Close'].shift(1), 'Downward change'] = df['Close'].shift(1) - df['Close']
-				df.loc[df['Close'] >= df['Close'].shift(1), 'Downward change'] = 0
-				upward_SMMA = df['Upward change'].ewm(alpha=1/14).mean()
-				downward_SMMA = df['Downward change'].ewm(alpha=1/14).mean()
-				relative_strength = upward_SMMA / downward_SMMA
-				rsi = 100 - (100 / (1+ relative_strength))
-				df['RSI'] = rsi
-
-				# MACD
-				EMA_26 = df['Close'].ewm(alpha=2/26).mean()
-				EMA_12 = df['Close'].ewm(alpha=2/12).mean()
-				df['MACD'] = EMA_12 - EMA_26
-				df['MACD Signal Line'] = df['MACD'].ewm(alpha=2/9).mean()
-				df['MACD Histogram'] = df['MACD'] - df['MACD Signal Line']
-
-				# Stochastic
-				df['Stochastic %K'] = ((df['Close'] - df['Low'].rolling(10).min()) / (df['High'].rolling(10).max() - df['Low'].rolling(10).min())) * 100
-				df['Stochastic %D'] = df['Stochastic %K'].rolling(3).mean()
-			
-				# Williams %R
-				df['Williams %R'] = ( df['High'].rolling(14).max() - df['Close']) / ( df['High'].rolling(14).max() - df['Low'].rolling(14).min()) * -100
-
-				# CCI
-				df['CCI'] = ( df['Typical price'] - df['Typical price'].rolling(20).mean() ) / ( abs(df['Typical price'] - df['Typical price'].rolling(20).mean()).mean() * 0.015 )
-
-				# Aroon
-				df['Aroon Up'] = 100 * df.High.rolling(25 + 1).apply(lambda x: x.argmax()) / 25
-				df['Aroon Down'] = 100 * df.Low.rolling(25 + 1).apply(lambda x: x.argmin()) / 25
-
-			df.to_csv('datasets/' + asset + '.csv', index=False)
-
-		elif 'Signals' in set_of_modules:
-
-			# Reading source file
-			df = pd.read_csv('datasets/' + asset + '.csv')
-
-			# Buy/sell signals
-			df['SMA 10/50 Signal'] = np.select(
-				[(df['SMA 10/50 ratio'] > 1) & (df['SMA 10/50 ratio'].shift(1) < 1), (df['SMA 10/50 ratio'] < 1) & (df['SMA 10/50 ratio'].shift(1) > 1)], 
-				[1, -1])
-			df['SMA 20/100 Signal'] = np.select(
-				[(df['SMA 20/100 ratio'] > 1) & (df['SMA 20/100 ratio'].shift(1) < 1), (df['SMA 20/100 ratio'] < 1) & (df['SMA 20/100 ratio'].shift(1) > 1)], 
-				[1, -1])
-			df['SMA 50/200 Signal'] = np.select(
-				[(df['SMA 50/200 ratio'] > 1) & (df['SMA 50/200 ratio'].shift(1) < 1), (df['SMA 50/200 ratio'] < 1) & (df['SMA 50/200 ratio'].shift(1) > 1)], 
-				[1, -1])
-			df['EMA 10/50 Signal'] = np.select(
-				[(df['EMA 10/50 ratio'] > 1) & (df['EMA 10/50 ratio'].shift(1) < 1), (df['EMA 10/50 ratio'] < 1) & (df['EMA 10/50 ratio'].shift(1) > 1)], 
-				[1, -1])
-			df['EMA 20/100 Signal'] = np.select(
-				[(df['EMA 20/100 ratio'] > 1) & (df['EMA 20/100 ratio'].shift(1) < 1), (df['EMA 20/100 ratio'] < 1) & (df['EMA 20/100 ratio'].shift(1) > 1)], 
-				[1, -1])
-			df['EMA 50/200 Signal'] = np.select(
-				[(df['EMA 50/200 ratio'] > 1) & (df['EMA 50/200 ratio'].shift(1) < 1), (df['EMA 50/200 ratio'] < 1) & (df['EMA 50/200 ratio'].shift(1) > 1)], 
-				[1, -1])
-			df['MACD Signal'] = np.select(
-				[(df['Trend 20'] > 1) & ((df['MACD Histogram']>0) & (df['MACD Histogram'].shift(1)<0)) , 
-					(df['Trend 20'] < 1) & ((df['MACD Histogram']<0) & (df['MACD Histogram'].shift(1)>0))], 
-				[1, -1])
-			df['RSI Signal'] = np.select(
-				[(df['Trend 20'] > 1) & (df['RSI'] > 40) & (df['RSI'].shift(1) < 40), 
-					(df['Trend 20'] < 1) & (df['RSI'] < 60) & (df['RSI'].shift(1) > 60)], 
-				[1, -1])
-			df['Bollinger Signal'] = np.select(
-				[(df['Close'] < df['Lower band']) & (df['Close'].shift(1) > df['Lower band'].shift(1)), 
-					(df['Close'] > df['Upper band']) & (df['Close'].shift(1) < df['Upper band'].shift(1))], 
-				[1, -1])
-			df['Stochastic Signal'] = np.select(
-				[(df['Trend 20'] > 1) & ((df['Stochastic %D']>20) & (df['Stochastic %D'].shift(1)<20)), 
-					(df['Trend 20'] < 1) & ((df['Stochastic %D']<80) & (df['Stochastic %D'].shift(1)>80))],
-				[1, -1])
-			df['Williams %R Signal'] = np.select(
-					[(df['Williams %R'] > -80) & (df['Williams %R'].shift(1) < -80), 
-					(df['Williams %R'] < -20) & (df['Williams %R'].shift(1) > -20)],
-				[1, -1])
-			df['CCI Signal'] = np.select(
-				[(df['CCI']>-100) & (df['CCI'].shift(1)<-100), 
-					(df['CCI']<100) & (df['CCI'].shift(1)>100)],
-				[1, -1])
-			df['Aroon Signal'] = np.select(
-				[(df['Trend 50'] > 1) & (df['Aroon Up'] > 70) & (df['Aroon Up'].shift(1) < 70), 
-					(df['Trend 50'] < 1) & (df['Aroon Down'] > 70) & (df['Aroon Down'].shift(1) < 30)],
-				[1, -1])
-
-			df.to_csv('datasets/' + asset + '.csv', index=False)
-
-		elif 'Candlestick Patterns' in set_of_modules:
-
-			# Reading source file
-			df = pd.read_csv('datasets/' + asset + '.csv')
-
-			realbody = abs(df['Open'] - df['Close'])
-			candle_range = df['High'] - df['Low']
-			upper_shadow = df['High'] - df[['Close', 'Open']].max(axis=1)
-			lower_shadow = df[['Close', 'Open']].min(axis=1) - df['Low']
-
-			# TREND REVERSAL PATTERNS
-			df['White Marubozu'] = np.where(
-				(df['Close'] > df['Open']) &
-				(df['Close'] == df['High']) &
-				(df['Open'] == df['Low'])
-			, 1, 0)
-			df['Black Marubozu'] = np.where(
-				(df['Close'] < df['Open']) &
-				(df['Close'] == df['Low']) &
-				(df['Open'] == df['High'])
-			, -1, 0)
-
-			df['Bullish Engulfing'] = np.where(
-				(df['Trend 20'] < 1) &
-				(df['Close'] > df['Open']) &
-				(df['Close'].shift(1) < df['Open'].shift(1)) &
-				(df['Close'] > df['Open'].shift(1)) &
-				(df['Open'] < df['Close'].shift(1))
-			, 1, 0)
-			df['Bearish Engulfing'] = np.where(
-				(df['Trend 20'] > 1) &
-				(df['Close'] < df['Open']) &
-				(df['Close'].shift(1) > df['Open'].shift(1)) &
-				(df['Close'] < df['Open'].shift(1)) &
-				(df['Open'] > df['Close'].shift(1))
-			, -1, 0)
-			df['Bullish Harami'] = np.where(
-				(df['Trend 20'] < 1) &
-				(df['Close'] > df['Open']) &
-				(df['Close'].shift(1) < df['Open'].shift(1)) &
-				(df['Close'] < df['Open'].shift(1)) &
-				(df['Open'] > df['Close'].shift(1))
-			, 1, 0)
-			df['Bearish Harami'] = np.where(
-				(df['Trend 20'] > 1) &
-				(df['Close'] < df['Open']) &
-				(df['Close'].shift(1) > df['Open'].shift(1)) &
-				(df['Close'] > df['Open'].shift(1)) &
-				(df['Open'] < df['Close'].shift(1))
-			, -1, 0)
-			df['Tweezer Bottom'] = np.where(
-				(df['Trend 20'] < 1) &
-				(df['Open'] < df['Close']) &
-				(df['Open'].shift(1) < df['Close'].shift(1)) &
-				(df['Low'] == df['Low'].shift(1))
-			, 1, 0)
-			df['Tweezer Top'] = np.where(
-				(df['Trend 20'] > 1) &
-				(df['Open'] > df['Close']) &
-				(df['Open'].shift(1) > df['Close'].shift(1)) &
-				(df['High'] == df['High'].shift(1))
-			, -1, 0)
-			df['Piercing Line'] = np.where(
-				(df['Trend 20'] < 1) &
-				(df['Close'] > df['Open']) &
-				(df['Close'].shift(1) < df['Open'].shift(1)) &
-				(df['Open'] < df['Close'].shift(1)) &
-				(df['Close'] > (df['Open'].shift(1) + df['Close'].shift(1))/2)
-			, 1, 0)
-			df['Dark Cloud Cover'] = np.where(
-				(df['Trend 20'] > 1) &
-				(df['Close'] < df['Open']) &
-				(df['Close'].shift(1) > df['Open'].shift(1)) &
-				(df['Close'] > df['Open'].shift(1)) &
-				(df['Close'] < (df['Open'].shift(1) + df['Close'].shift(1))/2)
-			, -1, 0)
-
-			df['Morning Star'] = np.where(
-				(df['Trend 20'] < 1) &
-				(df['Close'].shift(2) < df['Open'].shift(2)) &
-				(df['Close'] > df['Open']) &
-				(df['Open'] > df[['Close', 'Open']].max(axis=1).shift(1)) &
-				(df['Close'].shift(2) > df[['Close', 'Open']].max(axis=1).shift(1)) &
-				(df['Close'] > (df['Close'].shift(2) + df['Open'].shift(2))/2)
-			, 1, 0)
-			df['Evening Star'] = np.where(
-				(df['Trend 20'] > 1) &
-				(df['Close'].shift(2) > df['Open'].shift(2)) &
-				(df['Close'] < df['Open']) &
-				(df['Open'] < df[['Close', 'Open']].min(axis=1).shift(1)) &
-				(df['Close'].shift(2) < df[['Close', 'Open']].min(axis=1).shift(1)) &
-				(df['Close'] < (df['Close'].shift(2) + df['Open'].shift(2))/2)
-			, -1, 0)
-			df['Three White Soldiers'] = np.where(
-				(df['Trend 20'] < 1) &
-				(df['Close'] > df['Open']) &
-				(df['Close'].shift(1) > df['Open'].shift(1)) &
-				(df['Close'].shift(2) > df['Open'].shift(2)) &
-				(df['Close'] > df['Close'].shift(1)) &
-				(df['Close'].shift(1) > df['Close'].shift(2)) &
-				(df['Open'] > df['Open'].shift(1)) &
-				(df['Open'].shift(1) > df['Open'].shift(2)) &
-				(realbody > 0.8 * candle_range) &
-				(realbody.shift(1) > 0.8 * candle_range.shift(1)) &
-				(realbody.shift(2) > 0.8 * candle_range.shift(2)) &
-				(df['Open'] < df['Close'].shift(1)) &
-				(df['Open'].shift(1) < df['Close'].shift(2))
-			, 1, 0)
-			df['Three Black Crows'] = np.where(
-				(df['Trend 20'] > 1) &
-				(df['Close'] < df['Open']) &
-				(df['Close'].shift(1) < df['Open'].shift(1)) &
-				(df['Close'].shift(2) < df['Open'].shift(2)) &
-				(df['Close'] < df['Close'].shift(1)) &
-				(df['Close'].shift(1) < df['Close'].shift(2)) &
-				(df['Open'] < df['Open'].shift(1)) &
-				(df['Open'].shift(1) < df['Open'].shift(2)) &
-				(realbody > 0.8 * candle_range) &
-				(realbody.shift(1) > 0.8 * candle_range.shift(1)) &
-				(realbody.shift(2) > 0.8 * candle_range.shift(2)) &
-				(df['Open'] < df['Close'].shift(1)) &
-				(df['Open'].shift(1) < df['Close'].shift(2))
-			, -1, 0)
-			df['Three Inside Up'] = np.where(
-				(df['Trend 20'] < 1) &
-				(df['Open'].shift(2) > df['Close'].shift(2)) &
-				(df['Open'].shift(1) < df['Close'].shift(1)) &
-				(df['Open'] < df['Close']) &
-				(df['Close'].shift(1) < df['Open'].shift(2)) &
-				(df['Close'].shift(2) < df['Open'].shift(1)) &
-				(df['Close'] > df['Close'].shift(1)) &
-				(df['Open'] > df['Open'].shift(1))
-			,1 ,0)
-			df['Three Inside Down'] = np.where(
-				(df['Trend 20'] > 1) &
-				(df['Open'].shift(2) < df['Close'].shift(2)) &
-				(df['Open'].shift(1) > df['Close'].shift(1)) &
-				(df['Open'] > df['Close']) &
-				(df['Close'].shift(1) > df['Open'].shift(2)) &
-				(df['Close'].shift(2) > df['Open'].shift(1)) &
-				(df['Close'] < df['Close'].shift(1)) &
-				(df['Open'] < df['Open'].shift(1))
-			,-1 ,0)
-			df['Three Outside Up'] = np.where(
-				(df['Trend 20'] < 1) &
-				(df['Open'].shift(2) > df['Close'].shift(2)) &
-				(df['Open'].shift(1) < df['Close'].shift(1)) &
-				(df['Open'] < df['Close']) &
-				(df['Close'].shift(1) > df['Open'].shift(2)) &
-				(df['Close'].shift(2) > df['Open'].shift(1)) &
-				(df['Close'] > df['Close'].shift(1)) &
-				(df['Open'] > df['Open'].shift(1))
-			,1 ,0)
-			df['Three Outside Down'] = np.where(
-				(df['Trend 20'] > 1) &
-				(df['Open'].shift(2) < df['Close'].shift(2)) &
-				(df['Open'].shift(1) > df['Close'].shift(1)) &
-				(df['Open'] > df['Close']) &
-				(df['Close'].shift(1) > df['Open'].shift(2)) &
-				(df['Close'].shift(2) > df['Open'].shift(1)) &
-				(df['Close'] < df['Close'].shift(1)) &
-				(df['Open'] < df['Open'].shift(1))
-			,-1 ,0)
-
-			df['Upside Tasuki Gap'] = np.where(
-				(df['Trend 20'] > 1) &
-				(df['Close'].shift(2) > df['Open'].shift(2)) &
-				(df['Close'].shift(1) > df['Open'].shift(1)) &
-				(df['Open'] > df['Close']) &
-				(df['Open'].shift(1) > df['Close'].shift(2)) &
-				(df['Open'] > df['Open'].shift(1)) &
-				(df['Close'] < df['Close'].shift(2)) &
-				(df['Open'] < df['Close'].shift(1)) &
-				(df['Close'] > df['Open'].shift(2))
-			, 1, 0)
-			df['Downside Tasuki Gap'] = np.where(
-				(df['Trend 20'] < 1) &
-				(df['Close'].shift(2) < df['Open'].shift(2)) &
-				(df['Close'].shift(1) < df['Open'].shift(1)) &
-				(df['Open'] < df['Close']) &
-				(df['Open'].shift(1) < df['Close'].shift(2)) &
-				(df['Open'] < df['Open'].shift(1)) &
-				(df['Close'] > df['Close'].shift(2)) &
-				(df['Open'] > df['Close'].shift(1)) &
-				(df['Close'] < df['Open'].shift(2))
-			, -1, 0)
-
-			df.to_csv('datasets/' + asset + '.csv', index=False)
-
-		alert = dbc.Alert('Modules executed: {}'.format(set_of_modules), color='success', dismissable=True)
 		return alert
 
 @app.callback(
@@ -474,22 +127,22 @@ def generate(generate_button, set_of_assets, set_of_modules):
 	Input('asset', 'value'),
 	Input('date_range', 'value'),
 	Input('main_chart', 'value'),
-	Input('overlays', 'value'),
-	Input('oscillator1', 'value'),
-	Input('oscillator2', 'value'),
-	Input('signals', 'value'),
-	Input('candlestick_patterns', 'value'),
+#	Input('overlays', 'value'),
+#	Input('oscillator1', 'value'),
+#	Input('oscillator2', 'value'),
+#	Input('signals', 'value'),
+#	Input('candlestick_patterns', 'value'),
+	prevent_initial_call=False
 )
 
-def display_graph(asset, date_range, main_chart, overlays, oscillator1, oscillator2, signals, candlestick_patterns):
+def display_graph(asset, date_range, main_chart):												#, overlays, oscillator1, oscillator2, signals, candlestick_patterns):
 
-	if len(assets) != 0:
+	fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.03, row_heights=[0.6, 0.2, 0.2])
+
+	if asset is not None:
 
 		df = pd.read_csv('datasets/' + asset + '.csv')
-
 		columns = df.columns
-
-		fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.03, row_heights=[0.6, 0.2, 0.2])
 
 		# X AXIS RANGE
 
@@ -537,6 +190,8 @@ def display_graph(asset, date_range, main_chart, overlays, oscillator1, oscillat
 			), row=1, col=1)
 		elif main_chart == 'Close':
 			fig.add_trace(go.Scatter(x=df['Date'], y=df['Close'], name='Close Price'), row=1, col=1)
+
+		'''
 
 		# OVERLAYS
 		if type(overlays) == list:		
@@ -622,8 +277,9 @@ def display_graph(asset, date_range, main_chart, overlays, oscillator1, oscillat
 			y_list = df_slice['Typical price'].to_list()
 			fig.add_trace(go.Scatter(x=x_list, y=y_list, mode='markers', marker=dict(color='red', symbol='triangle-down', size=10), name=signal_type)) 
 
-		for signal in signals:
-			show_signals(signal)
+		if type(signals) == list:
+			for signal in signals:
+				show_signals(signal)
 
 		# CANDLESTICK PATTERS
 		def show_candlestick_patterns(pattern):
@@ -636,17 +292,11 @@ def display_graph(asset, date_range, main_chart, overlays, oscillator1, oscillat
 			y_list = df_slice['Typical price'].to_list()
 			fig.add_trace(go.Scatter(x=x_list, y=y_list, mode='markers', marker=dict(color='red', symbol='circle', size=10), name=pattern)) 
 
-		for pattern in candlestick_patterns:
-			show_candlestick_patterns(pattern)
+		if type(signals) == list:
+			for pattern in candlestick_patterns:
+				show_candlestick_patterns(pattern)
 
-
-		# Removing empty dates from X axis            ! NEED RUN FASTER
-	#	dt_all = pd.date_range(start=df['Date'].iloc[0],end=df['Date'].iloc[-1])
-	#	dt_obs = [d.strftime("%Y-%m-%d") for d in pd.to_datetime(df['Date'])]
-	#	dt_breaks = [d for d in dt_all.strftime("%Y-%m-%d").tolist() if not d in dt_obs]
-	#	fig.update_xaxes(rangebreaks=[dict(values=dt_breaks)])
-
-
+		'''
 
 		# OTHER FORMATTING
 
@@ -669,7 +319,9 @@ def display_graph(asset, date_range, main_chart, overlays, oscillator1, oscillat
 			showlegend=False
 		)
 
-		return fig
+	return fig
+
 
 if __name__ == '__main__':
 	app.run_server(debug=True, use_reloader=True)
+
